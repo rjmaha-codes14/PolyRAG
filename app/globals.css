@@ -1,0 +1,141 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans:wght@400;500;600;700&family=Noto+Sans+Tamil:wght@400;500;600;700&family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Noto+Sans+Telugu:wght@400;500;600;700&family=Noto+Sans+Kannada:wght@400;500;600;700&family=Noto+Sans+Malayalam:wght@400;500;600;700&family=Noto+Sans+Bengali:wght@400;500;600;700&family=Noto+Sans+Gujarati:wght@400;500;600;700&family=Noto+Sans+Gurmukhi:wght@400;500;600;700&family=Noto+Sans+Oriya:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+  --border: #e2e8f0;
+  --primary: #10b981;
+  --primary-foreground: #ffffff;
+  --muted: #f1f5f9;
+  --muted-foreground: #64748b;
+  --accent: #f0fdf4;
+  --accent-foreground: #166534;
+}
+
+.dark {
+  --background: #090d16;
+  --foreground: #f8fafc;
+  --card: #111827;
+  --card-foreground: #f8fafc;
+  --border: #1f2937;
+  --primary: #10b981;
+  --primary-foreground: #ffffff;
+  --muted: #1e293b;
+  --muted-foreground: #94a3b8;
+  --accent: #064e3b;
+  --accent-foreground: #a7f3d0;
+}
+
+/* Font size overrides */
+body[data-font-size="small"] {
+  font-size: 0.875rem;
+}
+body[data-font-size="medium"] {
+  font-size: 1rem;
+}
+body[data-font-size="large"] {
+  font-size: 1.125rem;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  color: var(--foreground);
+  background-color: var(--background);
+  font-family: 'Inter', 'Noto Sans', 'Noto Sans Tamil', 'Noto Sans Devanagari',
+    'Noto Sans Telugu', 'Noto Sans Kannada', 'Noto Sans Malayalam',
+    'Noto Sans Bengali', 'Noto Sans Gujarati', 'Noto Sans Gurmukhi',
+    'Noto Sans Oriya', 'Noto Sans Arabic', system-ui, sans-serif;
+  overflow-x: hidden;
+  min-height: 100dvh;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.3);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.5);
+}
+
+/* Markdown prose styling */
+.prose-polyrag {
+  color: inherit;
+  line-height: 1.68;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+.prose-polyrag p {
+  margin-bottom: 0.75rem;
+}
+.prose-polyrag p:last-child {
+  margin-bottom: 0;
+}
+.prose-polyrag h1,
+.prose-polyrag h2,
+.prose-polyrag h3,
+.prose-polyrag h4 {
+  font-weight: 600;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+.prose-polyrag ul,
+.prose-polyrag ol {
+  padding-left: 1.25rem;
+  margin-bottom: 0.75rem;
+}
+.prose-polyrag li {
+  margin-bottom: 0.25rem;
+}
+.prose-polyrag blockquote {
+  border-left: 3px solid #10b981;
+  padding-left: 0.875rem;
+  font-style: italic;
+  margin: 0.75rem 0;
+  color: #64748b;
+}
+.dark .prose-polyrag blockquote {
+  color: #94a3b8;
+}
+.prose-polyrag table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 0.9em;
+}
+.prose-polyrag th,
+.prose-polyrag td {
+  border: 1px solid #e2e8f0;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+.dark .prose-polyrag th,
+.dark .prose-polyrag td {
+  border-color: #374151;
+}
+.prose-polyrag th {
+  background-color: rgba(16, 185, 129, 0.08);
+}
+.prose-polyrag code:not(pre code) {
+  background-color: rgba(148, 163, 184, 0.15);
+  padding: 0.15rem 0.35rem;
+  border-radius: 0.25rem;
+  font-size: 0.875em;
+  font-family: monospace;
+}

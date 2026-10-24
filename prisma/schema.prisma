@@ -1,0 +1,83 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id                String         @id @default(uuid())
+  email             String         @unique
+  name              String?
+  passwordHash      String
+  defaultLanguage   String         @default("auto")
+  interfaceLanguage String         @default("en")
+  theme             String         @default("system")
+  fontSize          String         @default("medium")
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  conversations     Conversation[]
+  documents         Document[]
+}
+
+model Conversation {
+  id               String    @id @default(uuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title            String    @default("New Chat")
+  isPinned         Boolean   @default(false)
+  detectedLanguage String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  messages         Message[]
+}
+
+model Message {
+  id               String       @id @default(uuid())
+  conversationId   String
+  conversation     Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role             String
+  content          String
+  detectedLanguage String?
+  script           String?
+  isRomanized      Boolean      @default(false)
+  reaction         String?
+  attachmentName   String?
+  attachmentType   String?
+  attachmentPages  Int?
+  attachmentUrl    String?
+  sources          String?
+  createdAt        DateTime     @default(now())
+}
+
+model Document {
+  id          String          @id @default(uuid())
+  userId      String
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String
+  fileName    String
+  fileType    String
+  fileSize    Int
+  pageCount   Int             @default(1)
+  language    String?
+  status      String          @default("processing")
+  summary     String?
+  keyPoints   String?
+  actionItems String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  chunks      DocumentChunk[]
+}
+
+model DocumentChunk {
+  id         String   @id @default(uuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  pageNumber Int
+  chunkIndex Int
+  content    String
+  embedding  Bytes?
+  createdAt  DateTime @default(now())
+}
