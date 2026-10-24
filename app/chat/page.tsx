@@ -329,30 +329,41 @@ export default function ChatPage() {
       const decoder = new TextDecoder('utf-8');
       let buffer = '';
       let activeConversationSet = false;
+      let accumulatedClientText = '';
 
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n\n');
-        buffer = lines.pop() || '';
+        // Handle both CRLF and LF delimiters
+        const blocks = buffer.split(/\r?\n\r?\n/);
+        buffer = blocks.pop() || '';
 
-        for (const line of lines) {
-          if (!line.trim()) continue;
+        for (const block of blocks) {
+          if (!block.trim()) continue;
 
-          // Parse SSE event and data
-          const eventMatch = line.match(/^event:\s*(\w+)/m);
-          const dataMatch = line.match(/^data:\s*(.+)$/m);
+          // Parse SSE event and data lines
+          let eventType = 'chunk';
+          const dataLines: string[] = [];
 
-          const eventType = eventMatch ? eventMatch[1] : 'chunk';
-          const dataText = dataMatch ? dataMatch[1] : '{}';
+          for (const rawLine of block.split(/\r?\n/)) {
+            const trimmed = rawLine.trim();
+            if (trimmed.startsWith('event:')) {
+              eventType = trimmed.slice(6).trim();
+            } else if (trimmed.startsWith('data:')) {
+              dataLines.push(trimmed.slice(5).trim());
+            }
+          }
 
+          const dataText = dataLines.join('\n');
           let parsedData: any = {};
-          try {
-            parsedData = JSON.parse(dataText);
-          } catch {
-            // raw string fallback
+          if (dataText) {
+            try {
+              parsedData = JSON.parse(dataText);
+            } catch {
+              parsedData = { text: dataText };
+            }
           }
 
           if (eventType === 'meta') {
@@ -388,6 +399,7 @@ export default function ChatPage() {
             );
           } else if (eventType === 'chunk') {
             if (parsedData.text) {
+              accumulatedClientText += parsedData.text;
               setStreamingText((prev) => prev + parsedData.text);
             }
           } else if (eventType === 'done') {
@@ -395,7 +407,7 @@ export default function ChatPage() {
             const finalAssistantMsg: MessageItem = {
               id: parsedData.messageId || `msg-done-${Date.now()}`,
               role: 'assistant',
-              content: parsedData.fullText || streamingText,
+              content: parsedData.fullText || accumulatedClientText,
               detectedLanguage: streamingMeta?.detectedLanguage,
               script: streamingMeta?.script,
               isRomanized: streamingMeta?.isRomanized,

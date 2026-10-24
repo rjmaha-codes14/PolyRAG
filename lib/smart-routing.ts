@@ -80,7 +80,7 @@ async function rewriteToStandaloneQuery(
     const ai = getGoogleGenAI();
     const model = ai.getGenerativeModel({
       model: getGeminiModelName(),
-      generationConfig: { maxOutputTokens: 60, temperature: 0.1 },
+      generationConfig: { maxOutputTokens: 150, temperature: 0.1 },
     });
     const prompt = `Given the conversation history and a follow-up user query, rewrite the follow-up query into a single standalone search query.
 If the query is already standalone, return it as is. Do not answer it.

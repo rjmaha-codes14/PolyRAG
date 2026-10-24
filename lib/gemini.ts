@@ -1,23 +1,33 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
+// Clean environment variable values (remove surrounding quotes and whitespace)
+function cleanEnvVar(val: string | undefined): string {
+  if (!val) return '';
+  return val.replace(/^["']|["']$/g, '').trim();
+}
+
 // Retrieve model names from environment variables with current, official non-deprecated defaults
 export function getGeminiModelName(): string {
-  return process.env.GEMINI_MODEL?.trim() || 'gemini-1.5-flash';
+  const model = cleanEnvVar(process.env.GEMINI_MODEL);
+  return model || 'gemini-3.5-flash-lite';
 }
 
 export function getGeminiEmbedModelName(): string {
-  return process.env.GEMINI_EMBED_MODEL?.trim() || 'text-embedding-004';
+  const model = cleanEnvVar(process.env.GEMINI_EMBED_MODEL);
+  return model || 'gemini-embedding-001';
 }
 
 let genAIInstance: GoogleGenerativeAI | null = null;
+let cachedApiKey: string | null = null;
 
 export function getGoogleGenAI(): GoogleGenerativeAI {
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
-  if (!apiKey) {
+  const apiKey = cleanEnvVar(process.env.GEMINI_API_KEY);
+  if (!apiKey || apiKey === 'your-gemini-api-key-here') {
     throw new Error('GEMINI_API_KEY is not set or empty in environment.');
   }
-  if (!genAIInstance) {
+  if (!genAIInstance || cachedApiKey !== apiKey) {
     genAIInstance = new GoogleGenerativeAI(apiKey);
+    cachedApiKey = apiKey;
   }
   return genAIInstance;
 }
@@ -33,15 +43,15 @@ let lastHealthCheck: { time: number; status: GeminiHealthStatus } | null = null;
 
 /**
  * Health check self-test for Gemini API and configured models.
- * Cached for 30 seconds to prevent rate exhaustion.
+ * Cached for 30 seconds only on success to prevent repeated rate limits.
  */
 export async function checkGeminiHealth(): Promise<GeminiHealthStatus> {
   const now = Date.now();
-  if (lastHealthCheck && now - lastHealthCheck.time < 30_000) {
+  if (lastHealthCheck && lastHealthCheck.status.available && now - lastHealthCheck.time < 30_000) {
     return lastHealthCheck.status;
   }
 
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  const apiKey = cleanEnvVar(process.env.GEMINI_API_KEY);
   const modelName = getGeminiModelName();
   const embedModelName = getGeminiEmbedModelName();
 
@@ -52,19 +62,47 @@ export async function checkGeminiHealth(): Promise<GeminiHealthStatus> {
       embedModel: embedModelName,
       reason: 'GEMINI_API_KEY is missing or unconfigured in .env',
     };
-    lastHealthCheck = { time: now, status };
+    lastHealthCheck = null;
     return status;
   }
 
   try {
     const ai = getGoogleGenAI();
     const model = ai.getGenerativeModel({ model: modelName });
-    // Run a tiny 1-token test prompt
+    // Run a test prompt with sufficient maxOutputTokens (100)
+    // Models with internal thinking tokens need enough headroom to output response text
     const result = await model.generateContent({
       contents: [{ role: 'user', parts: [{ text: 'ping' }] }],
-      generationConfig: { maxOutputTokens: 2 },
+      generationConfig: { maxOutputTokens: 100 },
     });
-    const text = result.response.text();
+
+    if (result.response.promptFeedback?.blockReason) {
+      throw new Error(`Blocked by Gemini safety filter (${result.response.promptFeedback.blockReason})`);
+    }
+
+    const candidate = result.response.candidates?.[0];
+    if (candidate?.finishReason && candidate.finishReason !== 'STOP' && candidate.finishReason !== 'MAX_TOKENS') {
+      if (candidate.finishReason === 'SAFETY') {
+        throw new Error('Blocked by Gemini safety filters (SAFETY)');
+      }
+      if (candidate.finishReason === 'RECITATION') {
+        throw new Error('Blocked by Gemini recitation check (RECITATION)');
+      }
+      throw new Error(`Gemini finish reason: ${candidate.finishReason}`);
+    }
+
+    let text = '';
+    try {
+      text = result.response.text().trim();
+    } catch {
+      const parts = candidate?.content?.parts || [];
+      text = parts
+        .filter((p: any) => typeof p?.text === 'string')
+        .map((p: any) => p.text)
+        .join('')
+        .trim();
+    }
+
     if (text) {
       const status: GeminiHealthStatus = {
         available: true,
@@ -74,16 +112,45 @@ export async function checkGeminiHealth(): Promise<GeminiHealthStatus> {
       lastHealthCheck = { time: now, status };
       return status;
     }
-    throw new Error('Empty response received from Gemini model');
+
+    if (candidate?.finishReason === 'MAX_TOKENS') {
+      throw new Error('Thinking or output tokens exhausted before text could be returned (MAX_TOKENS)');
+    }
+
+    throw new Error(`Empty response received from Gemini model "${modelName}" (finishReason: ${candidate?.finishReason || 'unknown'})`);
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     let reason = errorMsg;
-    if (errorMsg.includes('API_KEY_INVALID') || errorMsg.includes('403')) {
-      reason = 'Invalid or unauthorized GEMINI_API_KEY';
-    } else if (errorMsg.includes('404') || errorMsg.includes('not found') || errorMsg.includes('retired')) {
-      reason = `Model "${modelName}" is retired, deprecated, or not available`;
-    } else if (errorMsg.includes('RESOURCE_EXHAUSTED') || errorMsg.includes('429')) {
+
+    if (
+      errorMsg.includes('API_KEY_INVALID') ||
+      errorMsg.includes('API key not valid') ||
+      errorMsg.includes('403') ||
+      errorMsg.includes('PERMISSION_DENIED')
+    ) {
+      reason = 'Invalid or unauthorized GEMINI_API_KEY (check your key in .env)';
+    } else if (
+      errorMsg.includes('404') ||
+      errorMsg.includes('not found') ||
+      errorMsg.includes('is no longer available') ||
+      errorMsg.includes('retired') ||
+      errorMsg.includes('deprecated')
+    ) {
+      reason = `Model "${modelName}" not found or retired (check GEMINI_MODEL in .env)`;
+    } else if (
+      errorMsg.includes('RESOURCE_EXHAUSTED') ||
+      errorMsg.includes('429') ||
+      errorMsg.includes('quota')
+    ) {
       reason = 'Gemini API quota exceeded or rate limited (429)';
+    } else if (errorMsg.includes('SAFETY') || errorMsg.includes('safety')) {
+      reason = 'Blocked by Gemini safety filters';
+    } else if (
+      errorMsg.includes('ENOTFOUND') ||
+      errorMsg.includes('ECONNREFUSED') ||
+      errorMsg.includes('fetch failed')
+    ) {
+      reason = 'Network error: cannot connect to Google Gemini API servers';
     }
 
     const status: GeminiHealthStatus = {
@@ -92,7 +159,7 @@ export async function checkGeminiHealth(): Promise<GeminiHealthStatus> {
       embedModel: embedModelName,
       reason,
     };
-    lastHealthCheck = { time: now, status };
+    lastHealthCheck = null;
     return status;
   }
 }
@@ -111,7 +178,7 @@ export async function detectLanguageWithGemini(
       model: getGeminiModelName(),
       generationConfig: {
         responseMimeType: 'application/json',
-        maxOutputTokens: 100,
+        maxOutputTokens: 200,
         temperature: 0.1,
       },
     });
@@ -244,7 +311,7 @@ export async function generateConversationTitle(firstMessage: string, langName: 
     const ai = getGoogleGenAI();
     const model = ai.getGenerativeModel({
       model: getGeminiModelName(),
-      generationConfig: { maxOutputTokens: 25, temperature: 0.3 },
+      generationConfig: { maxOutputTokens: 100, temperature: 0.3 },
     });
     const prompt = `Generate a concise title of at most 5 words for a chat that starts with this message:
 "${firstMessage.slice(0, 200)}"
