@@ -1,4 +1,12 @@
+import dns from 'node:dns';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+
+// Ensure Node.js Undici resolves IPv4 first on platforms/ISPs where IPv6 routing hangs or times out
+try {
+  dns.setDefaultResultOrder('ipv4first');
+} catch {
+  // Ignore in browser or non-node environments
+}
 
 // Clean environment variable values (remove surrounding quotes and whitespace)
 function cleanEnvVar(val: string | undefined): string {
@@ -119,49 +127,97 @@ export async function checkGeminiHealth(): Promise<GeminiHealthStatus> {
 
     throw new Error(`Empty response received from Gemini model "${modelName}" (finishReason: ${candidate?.finishReason || 'unknown'})`);
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    let reason = errorMsg;
-
-    if (
-      errorMsg.includes('API_KEY_INVALID') ||
-      errorMsg.includes('API key not valid') ||
-      errorMsg.includes('403') ||
-      errorMsg.includes('PERMISSION_DENIED')
-    ) {
-      reason = 'Invalid or unauthorized GEMINI_API_KEY (check your key in .env)';
-    } else if (
-      errorMsg.includes('404') ||
-      errorMsg.includes('not found') ||
-      errorMsg.includes('is no longer available') ||
-      errorMsg.includes('retired') ||
-      errorMsg.includes('deprecated')
-    ) {
-      reason = `Model "${modelName}" not found or retired (check GEMINI_MODEL in .env)`;
-    } else if (
-      errorMsg.includes('RESOURCE_EXHAUSTED') ||
-      errorMsg.includes('429') ||
-      errorMsg.includes('quota')
-    ) {
-      reason = 'Gemini API quota exceeded or rate limited (429)';
-    } else if (errorMsg.includes('SAFETY') || errorMsg.includes('safety')) {
-      reason = 'Blocked by Gemini safety filters';
-    } else if (
-      errorMsg.includes('ENOTFOUND') ||
-      errorMsg.includes('ECONNREFUSED') ||
-      errorMsg.includes('fetch failed')
-    ) {
-      reason = 'Network error: cannot connect to Google Gemini API servers';
-    }
+    const errorDetails = extractGeminiErrorDetails(err);
+    console.error(`Gemini health check failure (${modelName}):`, errorDetails.cleanMessage);
 
     const status: GeminiHealthStatus = {
       available: false,
       model: modelName,
       embedModel: embedModelName,
-      reason,
+      reason: errorDetails.cleanMessage,
     };
     lastHealthCheck = null;
     return status;
   }
+}
+
+/**
+ * Extract exact status codes, network errors (ENOTFOUND, ETIMEDOUT, etc.),
+ * and Google API details so the application shows the real root cause.
+ */
+export function extractGeminiErrorDetails(err: unknown): {
+  statusCode?: number;
+  networkCode?: string;
+  cleanMessage: string;
+} {
+  const errorObj = err as any;
+  const rawMsg = err instanceof Error ? err.message : String(err);
+
+  // Extract HTTP status code from error object or message (e.g. "[404 ]" or "[503 ]" or "status: 403")
+  let statusCode: number | undefined = typeof errorObj?.status === 'number' ? errorObj.status : undefined;
+  if (!statusCode) {
+    const statusMatch = rawMsg.match(/\[(\d{3})\s*[^\]]*\]/) || rawMsg.match(/\bstatus[:=]\s*(\d{3})\b/i);
+    if (statusMatch) {
+      statusCode = parseInt(statusMatch[1], 10);
+    }
+  }
+
+  // Extract network error code (e.g. ENOTFOUND, ETIMEDOUT, ECONNREFUSED) from err, cause, or message
+  let networkCode: string | undefined = errorObj?.code || errorObj?.cause?.code;
+  if (!networkCode) {
+    const netMatch = rawMsg.match(/\b(ENOTFOUND|ETIMEDOUT|ECONNREFUSED|ECONNRESET|EAI_AGAIN|UND_ERR_\w+)\b/);
+    if (netMatch) {
+      networkCode = netMatch[1];
+    }
+  }
+
+  // Clean and pinpoint user-facing category
+  let category = '';
+  if (
+    statusCode === 400 ||
+    statusCode === 403 ||
+    rawMsg.includes('API_KEY_INVALID') ||
+    rawMsg.includes('API key not valid') ||
+    rawMsg.includes('PERMISSION_DENIED')
+  ) {
+    category = 'Invalid or unauthorized GEMINI_API_KEY (check your key in .env)';
+  } else if (
+    statusCode === 404 ||
+    rawMsg.includes('not found') ||
+    rawMsg.includes('is no longer available') ||
+    rawMsg.includes('retired') ||
+    rawMsg.includes('deprecated')
+  ) {
+    category = 'Model not found or retired (check GEMINI_MODEL in .env)';
+  } else if (statusCode === 429 || rawMsg.includes('RESOURCE_EXHAUSTED') || rawMsg.includes('quota')) {
+    category = 'Gemini API quota exceeded or rate limited (429)';
+  } else if (statusCode === 503 || rawMsg.includes('UNAVAILABLE') || rawMsg.includes('high demand')) {
+    category = 'Gemini model temporarily unavailable (high demand spike: 503)';
+  } else if (networkCode || rawMsg.includes('fetch failed')) {
+    category = `Network error (${networkCode || 'connection failed'}): cannot reach Google Gemini API servers`;
+  } else if (rawMsg.includes('SAFETY') || rawMsg.includes('safety')) {
+    category = 'Blocked by Gemini safety filters';
+  }
+
+  // Extract specific message snippet, removing the SDK boilerplate prefix
+  let specificMessage = rawMsg
+    .replace(/^\[GoogleGenerativeAI Error\]:\s*/, '')
+    .replace(/^Error fetching from https:\/\/[^:]+:\s*/, '')
+    .trim();
+
+  const parts: string[] = [];
+  if (category) parts.push(category);
+  if (statusCode && !category.includes(String(statusCode))) parts.push(`HTTP ${statusCode}`);
+  if (networkCode && !category.includes(networkCode)) parts.push(`Code: ${networkCode}`);
+  if (specificMessage && !parts.some((p) => p.includes(specificMessage))) {
+    parts.push(specificMessage);
+  }
+
+  return {
+    statusCode,
+    networkCode,
+    cleanMessage: parts.join(' — ') || rawMsg,
+  };
 }
 
 /**

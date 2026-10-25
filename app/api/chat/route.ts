@@ -3,7 +3,7 @@ import { z } from 'zod';
 import prisma from '@/lib/prisma';
 import { getSessionUser } from '@/lib/auth';
 import { executeSmartRouting } from '@/lib/smart-routing';
-import { getGoogleGenAI, getGeminiModelName, generateConversationTitle, checkGeminiHealth } from '@/lib/gemini';
+import { getGoogleGenAI, getGeminiModelName, generateConversationTitle, checkGeminiHealth, extractGeminiErrorDetails } from '@/lib/gemini';
 import { getLanguageByCode } from '@/lib/languages';
 
 export const dynamic = 'force-dynamic';
@@ -324,21 +324,11 @@ export async function POST(req: Request) {
           controller.close();
         } catch (streamErr: unknown) {
           console.error('Error during LLM streaming:', streamErr);
-          const errorMsg = streamErr instanceof Error ? streamErr.message : 'Error generating response';
-          let userFriendlyError = errorMsg;
-          if (errorMsg.includes('API_KEY_INVALID') || errorMsg.includes('403') || errorMsg.includes('PERMISSION_DENIED')) {
-            userFriendlyError = 'Invalid or unauthorized GEMINI_API_KEY';
-          } else if (errorMsg.includes('404') || errorMsg.includes('not found') || errorMsg.includes('retired') || errorMsg.includes('is no longer available')) {
-            userFriendlyError = 'Model not found or no longer available';
-          } else if (errorMsg.includes('RESOURCE_EXHAUSTED') || errorMsg.includes('429')) {
-            userFriendlyError = 'Gemini API quota exceeded or rate limited (429)';
-          } else if (errorMsg.includes('safety') || errorMsg.includes('SAFETY')) {
-            userFriendlyError = 'Blocked by Gemini safety filters';
-          }
+          const details = extractGeminiErrorDetails(streamErr);
           controller.enqueue(
             encoder.encode(
               `event: error\ndata: ${JSON.stringify({
-                error: `AI generation error: ${userFriendlyError}`,
+                error: `AI generation error: ${details.cleanMessage}`,
               })}\n\n`
             )
           );
@@ -356,15 +346,7 @@ export async function POST(req: Request) {
     });
   } catch (err: unknown) {
     console.error('Chat endpoint fatal error:', err);
-    const msg = err instanceof Error ? err.message : 'Internal server error';
-    let cleanReason = msg;
-    if (msg.includes('API_KEY_INVALID') || msg.includes('403') || msg.includes('PERMISSION_DENIED')) {
-      cleanReason = 'Invalid or unauthorized GEMINI_API_KEY';
-    } else if (msg.includes('404') || msg.includes('not found') || msg.includes('retired')) {
-      cleanReason = 'Gemini model not found or retired';
-    } else if (msg.includes('RESOURCE_EXHAUSTED') || msg.includes('429')) {
-      cleanReason = 'Gemini API quota exceeded or rate limited (429)';
-    }
-    return NextResponse.json({ error: `AI model unavailable: ${cleanReason}` }, { status: 500 });
+    const details = extractGeminiErrorDetails(err);
+    return NextResponse.json({ error: `AI model unavailable: ${details.cleanMessage}` }, { status: 500 });
   }
 }

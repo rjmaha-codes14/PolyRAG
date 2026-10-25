@@ -15,16 +15,14 @@ This document explains the key technical decisions made while building PolyRAG.
 
 ---
 
-## 2. SQLite + Prisma (not PostgreSQL or a vector DB)
+## 2. PostgreSQL (Neon Serverless) + Prisma
 
-**Decision**: Store everything in a single SQLite file via Prisma.
+**Decision**: Use Neon serverless PostgreSQL via Prisma.
 
 **Rationale**:
-- Zero infra setup — the requirement explicitly forbade Docker and a separate backend.
-- SQLite is sufficient for the expected user load (single-tenant or small teams).
-- Embeddings are stored as `Bytes` (binary Float32 array) in the `DocumentChunk` table. Cosine similarity is computed entirely in TypeScript via typed arrays — no extension needed.
-
-**Trade-off**: Replacing SQLite with Postgres + `pgvector` would give better vector search performance at scale, but adds infra complexity incompatible with the requirements.
+- Serverless-native and Vercel-ready: Unlike SQLite (which writes to a local filesystem and gets lost on serverless platforms like Vercel), Neon PostgreSQL persists state across all deployments and serverless lambdas.
+- Connection pooling and auto-suspend provide cost efficiency and seamless scaling.
+- Embeddings continue to be stored cleanly as `Bytes` (`bytea`) in the `DocumentChunk` table. In-memory Float32 array cosine similarity and BM25 hybrid search remain fast and eliminate external vector DB dependency.
 
 ---
 

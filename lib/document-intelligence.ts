@@ -14,7 +14,7 @@ export interface IngestDocumentParams {
 
 /**
  * Ingest document in background: extract pages, detect language,
- * chunk (~800 chars), batch generate embeddings, save chunks to SQLite DB.
+ * chunk (~800 chars), batch generate embeddings, save chunks to PostgreSQL DB.
  */
 export async function ingestDocumentInBackground(params: IngestDocumentParams): Promise<void> {
   const { documentId, fileBuffer, fileType, fileName } = params;
@@ -43,36 +43,34 @@ export async function ingestDocumentInBackground(params: IngestDocumentParams): 
       embeddings = await batchGenerateEmbeddings(chunkTexts, 5, 250);
     }
 
-    // 5. Store chunks in DB using a transaction
-    await prisma.$transaction(async (tx) => {
-      // Clear existing chunks if any
-      await tx.documentChunk.deleteMany({ where: { documentId } });
+    // 5. Store chunks in DB (using createMany for fast, pooler-safe execution)
+    await prisma.documentChunk.deleteMany({ where: { documentId } });
 
-      for (let i = 0; i < chunkData.length; i++) {
-        const item = chunkData[i];
+    if (chunkData.length > 0) {
+      const chunksToInsert = chunkData.map((item, i) => {
         const embVals = embeddings[i];
-        const embeddingBuffer = embVals ? float32ArrayToBuffer(embVals) : null;
-
-        await tx.documentChunk.create({
-          data: {
-            documentId,
-            pageNumber: item.pageNumber,
-            chunkIndex: item.chunkIndex,
-            content: item.content,
-            embedding: embeddingBuffer,
-          },
-        });
-      }
-
-      // Update document status to ready
-      await tx.document.update({
-        where: { id: documentId },
-        data: {
-          pageCount,
-          language: primaryLang,
-          status: 'ready',
-        },
+        return {
+          documentId,
+          pageNumber: item.pageNumber,
+          chunkIndex: item.chunkIndex,
+          content: item.content,
+          embedding: embVals ? float32ArrayToBuffer(embVals) : null,
+        };
       });
+
+      await prisma.documentChunk.createMany({
+        data: chunksToInsert,
+      });
+    }
+
+    // Update document status to ready
+    await prisma.document.update({
+      where: { id: documentId },
+      data: {
+        pageCount,
+        language: primaryLang,
+        status: 'ready',
+      },
     });
 
     console.log(`✓ Document ${documentId} (${fileName}) successfully ingested with ${chunkData.length} chunks.`);

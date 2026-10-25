@@ -30,8 +30,8 @@ flowchart TD
         VisionOCR["Gemini Vision OCR (Indic Scans & Images)"]
     end
 
-    subgraph DB["SQLite + Prisma"]
-        SQLite[("prisma/dev.db (Users, Chats, Chunks, Embeddings as Bytes)")]
+    subgraph DB["PostgreSQL (Neon) + Prisma"]
+        Postgres[("Neon Serverless PostgreSQL (Users, Chats, Chunks, Embeddings as Bytes)")]
     end
 
     UI -->|HTTP POST| Server
@@ -40,10 +40,10 @@ flowchart TD
     Router -->|Parallel| LangDetect
     Router -->|Parallel| Hybrid
     LangDetect -->|JSON Disambiguation| LLM
-    Hybrid -->|Float32 Cosine Search| SQLite
+    Hybrid -->|Float32 Cosine Search| Postgres
     DocIngest -->|Batch Embeddings| Embeddings
     DocIngest -->|Scanned Pages / Images| VisionOCR
-    DocIngest -->|Store Chunks & Embeddings| SQLite
+    DocIngest -->|Store Chunks & Embeddings| Postgres
     Hybrid -->|Top Chunks as DATA Context| LLM
     LLM -->|Token-by-Token SSE Stream| SSE
     SSE --> UI
@@ -62,7 +62,7 @@ flowchart TD
 | ⚡ **Low Latency Streaming** | Real-time token-by-token streaming via Server-Sent Events (SSE) with typing indicators |
 | 🔐 **Self-Contained Auth** | bcrypt password hashing + jose JWT in httpOnly cookies, rate-limiting (5 attempts / 15 min) |
 | 🌓 **Theme & Typography** | Dark/light/system theme, customizable font sizes, RTL layout for Urdu/Kashmiri/Sindhi/Arabic |
-| 💾 **Persistent Chat History** | Conversation history saved in SQLite via Prisma, with auto-generated titles |
+| 💾 **Persistent Chat History** | Conversation history saved in PostgreSQL (Neon) via Prisma, with auto-generated titles |
 | 📤 **Export & Share** | Download chats as Markdown, Web Share API support |
 | 🏥 **Zero-Downtime Health** | Self-test on startup and at `/api/health` displaying actionable alerts if API key is invalid |
 
@@ -97,11 +97,37 @@ PolyRAG directly supports the United Nations Sustainable Development Goals:
 
 ---
 
-## 🚀 Windows & Quick Start Guide
+## 🚀 Quick Start Guide
 
 ### Prerequisites
 - Node.js ≥ 18.0.0
 - Google Gemini API key ([Get one free from Google AI Studio](https://aistudio.google.com/app/apikey))
+- Neon Serverless PostgreSQL Database ([Create free account at neon.tech](https://neon.tech))
+
+---
+
+## 🐘 Setting Up Free Neon PostgreSQL Database
+
+1. **Sign Up / Log In**: Go to **[https://neon.tech](https://neon.tech)** and sign in with GitHub or Google.
+2. **Create a Project**:
+   - Click **Create Project** or **New Project**.
+   - Name your project (e.g., `polyrag-db`).
+   - Select Postgres version (PostgreSQL 16 or 15 recommended).
+   - Choose a region closest to your Vercel deployment (e.g., `AWS us-east-2` or `AWS us-east-1`).
+   - Click **Create Project**.
+3. **Copy the Connection String**:
+   - On the Neon Project Dashboard, locate the **Connection Details** box.
+   - Choose **Prisma** or **Pooled connection** from the dropdown.
+   - Copy the connection string. It will look like:
+     ```
+     postgresql://neondb_owner:YOUR_PASSWORD@ep-xyz-123456.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require
+     ```
+   - **Tip**: Append `&connect_timeout=30` to allow sufficient time for Neon's serverless compute to wake up on cold starts:
+     ```
+     postgresql://neondb_owner:YOUR_PASSWORD@ep-xyz-123456.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require&connect_timeout=30
+     ```
+
+---
 
 ### 1. Installation
 ```powershell
@@ -109,7 +135,6 @@ git clone <repo-url>
 cd PolyRAG
 npm install
 ```
-*(The `postinstall` hook automatically initializes the SQLite schema and seeds the demo user).*
 
 ### 2. Configure Environment
 Create or edit `.env`:
@@ -117,16 +142,37 @@ Create or edit `.env`:
 GEMINI_API_KEY="AIzaSy..."   # Replace with your actual Gemini API Key
 GEMINI_MODEL="gemini-1.5-flash"
 GEMINI_EMBED_MODEL="text-embedding-004"
-DATABASE_URL="file:./prisma/dev.db"
+DATABASE_URL="postgresql://neondb_owner:YOUR_PASSWORD@ep-xyz-123456.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require&connect_timeout=30"
 JWT_SECRET="polyrag-enterprise-secure-jwt-secret-key-32chars"
 NODE_ENV="development"
 ```
 
-### 3. Run the App
+### 3. Sync Database Schema & Seed Demo User
+```powershell
+npx prisma db push
+npm run seed
+```
+
+### 4. Run the App Locally
 ```powershell
 npm run dev
 ```
 Open **[http://localhost:3000](http://localhost:3000)** in your browser.
+
+---
+
+## ☁️ Deploying to Vercel
+
+1. Push your repository to GitHub / GitLab / Bitbucket.
+2. In the [Vercel Dashboard](https://vercel.com/new), import your PolyRAG repository.
+3. In **Project Settings > Environment Variables**, add the following:
+   - `DATABASE_URL`: Your Neon PostgreSQL connection string (with `?sslmode=require&connect_timeout=30`)
+   - `GEMINI_API_KEY`: Your Google Gemini API Key
+   - `GEMINI_MODEL`: `gemini-1.5-flash`
+   - `GEMINI_EMBED_MODEL`: `text-embedding-004`
+   - `JWT_SECRET`: Random 32+ character string
+   - `NODE_ENV`: `production`
+4. Click **Deploy**. Vercel will automatically run `npm run build` (`prisma generate && next build`) and launch the application.
 
 ---
 
@@ -154,10 +200,10 @@ Open **[http://localhost:3000](http://localhost:3000)** in your browser.
 | Command | Action |
 |---|---|
 | `npm run dev` | Start Next.js App Router development server |
-| `npm run build` | Build production-optimized application |
+| `npm run build` | Generate Prisma client and build production-optimized application |
 | `npm run start` | Run production server |
 | `npm run lint` | Run ESLint type and style validation |
-| `npm run seed` | Re-seed demo user into SQLite |
+| `npm run seed` | Seed demo user (`demo@polyrag.ai`) into PostgreSQL |
 
 ---
 

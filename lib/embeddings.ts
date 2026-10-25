@@ -13,7 +13,7 @@ export function float32ArrayToBuffer(floats: number[] | Float32Array): Buffer {
 }
 
 /**
- * Convert a stored Buffer from SQLite Bytes back into a Float32Array.
+ * Convert a stored Buffer from PostgreSQL Bytes back into a Float32Array.
  */
 export function bufferToFloat32Array(buffer: Buffer | Uint8Array): Float32Array {
   const byteOffset = buffer.byteOffset;

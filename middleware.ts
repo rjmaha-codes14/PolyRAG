@@ -45,14 +45,22 @@ export async function middleware(req: NextRequest) {
 
   // Protected API routes: return 401 JSON if unauthorized
   if (pathname.startsWith('/api/') && !isValid) {
-    return NextResponse.json({ error: 'Unauthorized access' }, { status: 401 });
+    const res = NextResponse.json({ error: 'Unauthorized access' }, { status: 401 });
+    if (token) {
+      res.cookies.set(AUTH_COOKIE, '', { path: '/', expires: new Date(0), maxAge: 0 });
+    }
+    return res;
   }
 
   // Protected Page routes (e.g. /chat, /, etc.): redirect to /login
   if (!isValid) {
     const loginUrl = new URL('/login', req.url);
     loginUrl.searchParams.set('from', pathname);
-    return NextResponse.redirect(loginUrl);
+    const res = NextResponse.redirect(loginUrl);
+    if (token) {
+      res.cookies.set(AUTH_COOKIE, '', { path: '/', expires: new Date(0), maxAge: 0 });
+    }
+    return res;
   }
 
   return NextResponse.next();
