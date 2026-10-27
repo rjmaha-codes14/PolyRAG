@@ -101,11 +101,11 @@ async function extractPdfPages(pdfBuffer: Buffer): Promise<ExtractedPage[]> {
       },
     };
 
-    await pdfParse(uint8, options);
+    await pdfParse(Buffer.from(uint8), options);
   } catch (err) {
     console.warn('pdf-parse custom pagerender failed, using default text extraction:', err);
     try {
-      const data = await pdfParse(uint8);
+      const data = await pdfParse(Buffer.from(uint8));
       if (data.text) {
         return splitTextIntoPages(data.text, 2500);
       }
